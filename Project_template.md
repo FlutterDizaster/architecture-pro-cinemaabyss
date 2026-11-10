@@ -403,6 +403,17 @@ https://cinemaabyss.example.com/api/movies
 и приложите скриншот развертывания helm и вывода https://cinemaabyss.example.com/api/movies
 
 
+### Решение задания 4
+
+Заполнил шаблоны [proxy-service.yaml](src/kubernetes/helm/templates/services/proxy-service.yaml) и [events-service.yaml](src/kubernetes/helm/templates/services/events-service.yaml) по образцу movies, в `values.yaml` прописал свои образы и тот же пустой pull-секрет. В шаблоне configmap был адрес `http://movies:8081`, а сервис называется `movies-service`, поправил и добавил `EVENTS_SERVICE_URL`. Ставил так (на macOS путь через прямые слэши):
+
+```bash
+helm install cinemaabyss ./src/kubernetes/helm --namespace cinemaabyss --create-namespace
+```
+
+![Helm](docs/screenshots/task4-helm.png)
+
+
 # Задание 5
 Компания планирует активно развиваться и для повышения надежности, безопасности, реализации сетевых паттернов типа Circuit Breaker и канареечного деплоя вам как архитектору необходимо развернуть istio и настроить circuit breaker для monolith и movies сервисов.
 
