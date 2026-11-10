@@ -478,3 +478,19 @@ You can see 21 for the upstream_rq_pending_overflow value which means 21 calls s
 ```
 
 Приложите скриншот работы circuit breaker'а
+
+### Решение задания 5
+
+В [circuit-breaker-config.yaml](src/kubernetes/circuit-breaker-config.yaml) два DestinationRule, для `monolith` и `movies-service`: не больше пяти соединений и двух запросов в очереди, а экземпляр, который трижды подряд ответил 5xx, на минуту убирается из балансировки, но не больше половины экземпляров сразу. Лимиты маленькие, чтобы срабатывание было видно на одной реплике и учебной нагрузке, для прода их надо подбирать по реальному трафику. Istio ставил helm-чартами, как в инструкции выше. После метки `istio-injection` перезапустил деплойменты, чтобы к подам подсели sidecar.
+
+Fortio в 50 потоков на 500 запросов: больше 90% ответов 503, потому что запросы сверх лимита сразу отбивает sidecar. В статистике это `upstream_rq_pending_overflow`.
+
+![Circuit breaker](docs/screenshots/task5-circuit-breaker.png)
+
+Удаляем все
+```bash
+istioctl uninstall --purge
+kubectl delete namespace istio-system
+kubectl delete all --all -n cinemaabyss
+kubectl delete namespace cinemaabyss
+```
