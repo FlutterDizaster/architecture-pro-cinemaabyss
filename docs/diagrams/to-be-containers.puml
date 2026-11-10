@@ -1,0 +1,86 @@
+@startuml to-be-containers
+!include <C4/C4_Container>
+
+LAYOUT_TOP_DOWN()
+
+title Диаграмма контейнеров — To-Be, «Кинобездна»
+
+Person(viewer, "Зритель", "Смотрит фильмы с телефона, ноутбука и Smart TV по единой подписке")
+
+System_Boundary(cinema, "Онлайн-кинотеатр «Кинобездна»") {
+    Container(web, "Веб-приложение", "React, SPA", "Каталог, плеер, профиль, подписка")
+    Container(mobile, "Мобильное приложение", "iOS, Android", "То же, облегчённые ответы")
+    Container(tv, "Приложение Smart TV", "Tizen, webOS, Android TV", "Каталог и плеер под пульт")
+
+    Container(gw, "API Gateway", "Go", "Единая точка входа: проверка JWT, маршрутизация, лимиты")
+
+    Container(bff_web, "BFF веб", "Go", "Собирает ответы для веба")
+    Container(bff_mobile, "BFF мобильный", "Go", "Урезанные ответы и пагинация для телефонов")
+    Container(bff_tv, "BFF Smart TV", "Go", "Крупные постеры и плоские списки для ТВ")
+
+    Container(users, "Пользователи", "Go", "Регистрация, вход, выдача JWT, профиль и избранное")
+    ContainerDb(users_db, "БД пользователей", "PostgreSQL")
+
+    Container(movies, "Каталог фильмов (movies)", "Go", "Метаданные: фильмы, жанры, актёры, оценки, ссылки на источники видео")
+    ContainerDb(movies_db, "БД каталога", "PostgreSQL")
+
+    Container(subs, "Подписки", "Go", "Тарифы, подписки, скидки, проверка доступа к контенту")
+    ContainerDb(subs_db, "БД подписок", "PostgreSQL")
+
+    Container(payments, "Платежи", "Go", "Приём оплаты, возвраты, адаптер к платёжным системам")
+    ContainerDb(payments_db, "БД платежей", "PostgreSQL")
+
+    Container(events, "События (events)", "Go", "Принимает события от клиентов (просмотр, оценка) и пишет их в Kafka")
+    ContainerQueue(kafka, "Шина событий", "Kafka", "user-events, movie-events, payment-events")
+
+    Container(reco, "Рекомендации", "Go", "Anti-Corruption Layer к сторонней рекомендательной системе, хранит готовые подборки")
+    Container(partners, "Интеграции с партнёрами", "Go", "Адаптеры к программам лояльности и маркетплейсам")
+}
+
+System_Ext(pay_ext, "Платёжные системы", "Эквайринг, СБП")
+System_Ext(reco_ext, "Рекомендательная система", "Сторонний сервис подборок")
+System_Ext(loyalty_ext, "Партнёры", "Программы лояльности, маркетплейсы")
+System_Ext(video_ext, "Источники видео", "Сторонние сервисы и открытые источники")
+
+Rel(viewer, web, "Пользуется", "HTTPS")
+Rel(viewer, mobile, "Пользуется", "HTTPS")
+Rel(viewer, tv, "Пользуется", "HTTPS")
+Rel(viewer, video_ext, "Смотрит видео по ссылке из каталога", "HLS")
+
+Rel(web, gw, "API", "REST/JSON")
+Rel(mobile, gw, "API", "REST/JSON")
+Rel(tv, gw, "API", "REST/JSON")
+
+Rel(gw, bff_web, "Запросы веба", "REST")
+Rel(gw, bff_mobile, "Запросы мобильных", "REST")
+Rel(gw, bff_tv, "Запросы ТВ", "REST")
+Rel(gw, users, "Вход и регистрация", "REST")
+Rel(gw, events, "События просмотра и оценки", "REST")
+
+Rel(bff_web, movies, "Каталог", "REST")
+Rel(bff_web, subs, "Подписка и доступ", "REST")
+Rel(bff_web, payments, "Оплата", "REST")
+Rel(bff_web, reco, "Подборки", "REST")
+Rel(bff_web, users, "Профиль, избранное", "REST")
+Rel(bff_mobile, movies, "Те же сервисы, что у BFF веб", "REST")
+Rel(bff_tv, movies, "Те же сервисы, что у BFF веб", "REST")
+
+Rel(users, users_db, "Читает и пишет", "SQL")
+Rel(movies, movies_db, "Читает и пишет", "SQL")
+Rel(subs, subs_db, "Читает и пишет", "SQL")
+Rel(payments, payments_db, "Читает и пишет", "SQL")
+
+Rel(payments, pay_ext, "Проводит платёж", "HTTPS")
+Rel(users, kafka, "Публикует user-events", "Kafka")
+Rel(movies, kafka, "Публикует movie-events", "Kafka")
+Rel(payments, kafka, "Публикует payment-events", "Kafka")
+Rel(events, kafka, "Публикует movie-events, user-events, payment-events", "Kafka")
+Rel(subs, kafka, "Читает payment-events, продлевает подписку", "Kafka")
+Rel(reco, kafka, "Читает просмотры и оценки", "Kafka")
+Rel(partners, kafka, "Читает payment-events и user-events", "Kafka")
+
+Rel(reco, reco_ext, "Отправляет историю, забирает подборки", "HTTPS")
+Rel(partners, loyalty_ext, "Начисляет баллы, синхронизирует заказы", "HTTPS")
+
+SHOW_LEGEND()
+@enduml
