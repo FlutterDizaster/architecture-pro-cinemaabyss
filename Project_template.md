@@ -305,6 +305,29 @@ cat .docker/config.json | base64
 #### Шаг 3
 Добавьте сюда скриншота вывода при вызове https://cinemaabyss.example.com/api/movies и  скриншот вывода event-service после вызова тестов.
 
+### Решение задания 3
+
+В `docker-build-push.yml` добавил ветку `cinema` в триггер и шаги сборки proxy и events. Образы собираю сразу под amd64 и arm64, иначе они не запускались в minikube на Mac. `api-tests` тоже запускается на push в `cinema`. Обе сборки зелёные:
+
+![GitHub Actions](docs/screenshots/task3-actions.png)
+
+Для proxy и events сделал Deployment и Service, ingress отправляет `/` в proxy, а `/api/events` сразу в events. Образы в GHCR публичные, поэтому в `dockerconfigsecret.yaml` лежит пустой `{"auths":{}}`: личный токен в публичный репозиторий класть не стал, а для публичных образов он не нужен.
+
+`minikube tunnel` и правка `/etc/hosts` требуют sudo, так что до ingress ходил через `kubectl port-forward` на порт 18080 с заголовком `Host: cinemaabyss.example.com`. В configmap `MOVIES_MIGRATION_PERCENT` равен 100, и в логе прокси все `/api/movies` уходят в movies-service.
+
+![Поды](docs/screenshots/task3-pods.png)
+
+![/api/movies](docs/screenshots/task3-api-movies.png)
+
+Тесты через ingress прошли все, хотя в задании сказано, что health-check упадут. Дело в том, что все запросы к хосту идут в прокси: на `/health` он отвечает сам, а `/api/movies/health` пропускает в movies, так что тест «Monolith Health Check» здесь фактически проверяет прокси. `/api/events` ingress по шаблону отправляет сразу в events, мимо прокси.
+
+![Тесты в кластере](docs/screenshots/task3-newman.png)
+
+Лог events-service после тестов:
+
+![Лог events в кластере](docs/screenshots/task3-events-log.png)
+
+
 ## Задание 4
 Для простоты дальнейшего обновления и развертывания вам как архитектуру необходимо так же реализовать helm-чарты для прокси-сервиса и проверить работу 
 
