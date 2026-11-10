@@ -68,6 +68,29 @@
 Приложите скриншот тестов и скриншот состояния топиков Kafka http://localhost:8090 
 
 
+### Решение задания 2
+
+Прокси написал на Go без внешних зависимостей, на `httputil.ReverseProxy`: [proxy/main.go](src/microservices/proxy/main.go). Запросы `/api/movies` при `GRADUAL_MIGRATION=true` уходят в movies-service с вероятностью `MOVIES_MIGRATION_PERCENT`, остальные в монолит. Если флаг выключить, весь домен movies идёт в новый сервис, то есть миграция закончена. `/api/events` отправляю в events, всё прочее в монолит. Куда ушёл каждый запрос, прокси пишет в лог. Проверил на 20 запросах при 0, 50 и 100 процентах:
+
+![Постепенный переход](docs/screenshots/task2-migration.png)
+
+Events тоже на Go, с `segmentio/kafka-go`: [events/main.go](src/microservices/events/main.go). `POST /api/events/{movie,user,payment}` кладёт тело в топик `movie-events`, `user-events` или `payment-events` и, как в спецификации, возвращает partition, offset и само событие. Три консьюмера внутри того же сервиса читают эти топики и пишут события в лог.
+
+В docker-compose монолит и movies теперь ждут healthcheck postgres, иначе они стартовали раньше базы и падали.
+
+Тесты Postman прошли все, 42 из 42. Запускал их Docker-образом из `tests/postman`, как это делает CI, потому что локальный Node 26 не запускает старый yargs.
+
+![Тесты](docs/screenshots/task2-newman.png)
+
+Топики в Kafka UI. Порт 8090 у меня занят, поэтому UI поднимал на 8091:
+
+![Топики Kafka](docs/screenshots/task2-kafka-topics.png)
+
+Лог events-service, видно и отправку, и чтение:
+
+![Лог events](docs/screenshots/task2-events-log.png)
+
+
 ## Задание 3
 
 Команда начала переезд в Kubernetes для лучшего масштабирования и повышения надежности. 
