@@ -5,7 +5,15 @@
 1. Спроектируйте to be архитектуру КиноБездны, разделив всю систему на отдельные домены и организовав интеграционное взаимодействие и единую точку вызова сервисов.
 Результат представьте в виде контейнерной диаграммы в нотации С4.
 Добавьте ссылку на файл в этот шаблон
-[ссылка на файл](ссылка)
+[ссылка на файл](docs/diagrams/to-be-containers.puml)
+
+![To-Be](docs/diagrams/to-be-containers.png)
+
+Разбил систему по доменам из описания: пользователи (вход, профиль, избранное), каталог фильмов, подписки со скидками, платежи. У каждого сервиса своя база, общей БД в целевой картине нет. Сторонние системы спрятал за отдельными сервисами-адаптерами: рекомендации и интеграции с партнёрами, чтобы их модели не протекали в домены.
+
+Единая точка вызова это API Gateway. Он проверяет токен и раскидывает запросы. На схеме целевое состояние, монолита в нём уже нет. Пока идёт переезд, этот же шлюз делит трафик между монолитом и новыми сервисами по фиче-флагу, это прокси из задания 2. Клиенты у Кинобездны разные, поэтому за шлюзом стоят BFF под веб, мобильные и Smart TV, каждый отдаёт свой объём данных. У мобильного и ТВ BFF те же связи с сервисами, что у веба, на схеме не стал их дублировать.
+
+Синхронно ходим только там, где нужен ответ сразу. Остальное через Kafka: платёж публикует событие, подписки по нему продлеваются, рекомендации и партнёрские интеграции читают просмотры и оплаты. Сервис events принимает события от клиентов и тоже пишет в шину.
 
 
 ## Задание 2
@@ -58,6 +66,29 @@
 
 Необходимые тесты для проверки этого API вызываются при запуске npm run test:local из папки tests/postman 
 Приложите скриншот тестов и скриншот состояния топиков Kafka http://localhost:8090 
+
+
+### Решение задания 2
+
+Прокси написал на Go без внешних зависимостей, на `httputil.ReverseProxy`: [proxy/main.go](src/microservices/proxy/main.go). Запросы `/api/movies` при `GRADUAL_MIGRATION=true` уходят в movies-service с вероятностью `MOVIES_MIGRATION_PERCENT`, остальные в монолит. Если флаг выключить, весь домен movies идёт в новый сервис, то есть миграция закончена. `/api/events` отправляю в events, всё прочее в монолит. Куда ушёл каждый запрос, прокси пишет в лог. Проверил на 20 запросах при 0, 50 и 100 процентах:
+
+![Постепенный переход](docs/screenshots/task2-migration.png)
+
+Events тоже на Go, с `segmentio/kafka-go`: [events/main.go](src/microservices/events/main.go). `POST /api/events/{movie,user,payment}` кладёт тело в топик `movie-events`, `user-events` или `payment-events` и, как в спецификации, возвращает partition, offset и само событие. Три консьюмера внутри того же сервиса читают эти топики и пишут события в лог.
+
+В docker-compose монолит и movies теперь ждут healthcheck postgres, иначе они стартовали раньше базы и падали.
+
+Тесты Postman прошли все, 42 из 42. Запускал их Docker-образом из `tests/postman`, как это делает CI, потому что локальный Node 26 не запускает старый yargs.
+
+![Тесты](docs/screenshots/task2-newman.png)
+
+Топики в Kafka UI. Порт 8090 у меня занят, поэтому UI поднимал на 8091:
+
+![Топики Kafka](docs/screenshots/task2-kafka-topics.png)
+
+Лог events-service, видно и отправку, и чтение:
+
+![Лог events](docs/screenshots/task2-events-log.png)
 
 
 ## Задание 3
@@ -274,6 +305,28 @@ cat .docker/config.json | base64
 #### Шаг 3
 Добавьте сюда скриншота вывода при вызове https://cinemaabyss.example.com/api/movies и  скриншот вывода event-service после вызова тестов.
 
+### Решение задания 3
+
+В `docker-build-push.yml` добавил ветку `cinema` в триггер и шаги сборки proxy и events. Образы собираю сразу под amd64 и arm64, иначе они не запускались в minikube на Mac. `api-tests` тоже запускается на push в `cinema`. Обе сборки зелёные:
+
+![GitHub Actions](docs/screenshots/task3-actions.png)
+
+Для proxy и events сделал Deployment и Service, ingress отправляет `/` в proxy, а `/api/events` сразу в events. Образы в GHCR публичные, поэтому в `dockerconfigsecret.yaml` лежит пустой `{"auths":{}}`: личный токен в публичный репозиторий класть не стал, а для публичных образов он не нужен.
+
+`minikube tunnel` и правка `/etc/hosts` требуют sudo, так что до ingress ходил через `kubectl port-forward` на порт 18080 с заголовком `Host: cinemaabyss.example.com`. В configmap `MOVIES_MIGRATION_PERCENT` равен 100, и в логе прокси все `/api/movies` уходят в movies-service.
+
+![Поды](docs/screenshots/task3-pods.png)
+
+![/api/movies](docs/screenshots/task3-api-movies.png)
+
+Тесты через ingress прошли все, хотя в задании сказано, что health-check упадут. Дело в том, что все запросы к хосту идут в прокси: на `/health` он отвечает сам, а `/api/movies/health` пропускает в movies, так что тест «Monolith Health Check» здесь фактически проверяет прокси. `/api/events` ingress по шаблону отправляет сразу в events, мимо прокси.
+
+![Тесты в кластере](docs/screenshots/task3-newman.png)
+
+Лог events-service после тестов:
+
+![Лог events в кластере](docs/screenshots/task3-events-log.png)
+
 
 ## Задание 4
 Для простоты дальнейшего обновления и развертывания вам как архитектуру необходимо так же реализовать helm-чарты для прокси-сервиса и проверить работу 
@@ -350,6 +403,17 @@ https://cinemaabyss.example.com/api/movies
 и приложите скриншот развертывания helm и вывода https://cinemaabyss.example.com/api/movies
 
 
+### Решение задания 4
+
+Заполнил шаблоны [proxy-service.yaml](src/kubernetes/helm/templates/services/proxy-service.yaml) и [events-service.yaml](src/kubernetes/helm/templates/services/events-service.yaml) по образцу movies, в `values.yaml` прописал свои образы и тот же пустой pull-секрет. В шаблоне configmap был адрес `http://movies:8081`, а сервис называется `movies-service`, поправил и добавил `EVENTS_SERVICE_URL`. Ставил так (на macOS путь через прямые слэши):
+
+```bash
+helm install cinemaabyss ./src/kubernetes/helm --namespace cinemaabyss --create-namespace
+```
+
+![Helm](docs/screenshots/task4-helm.png)
+
+
 # Задание 5
 Компания планирует активно развиваться и для повышения надежности, безопасности, реализации сетевых паттернов типа Circuit Breaker и канареечного деплоя вам как архитектору необходимо развернуть istio и настроить circuit breaker для monolith и movies сервисов.
 
@@ -414,6 +478,14 @@ You can see 21 for the upstream_rq_pending_overflow value which means 21 calls s
 ```
 
 Приложите скриншот работы circuit breaker'а
+
+### Решение задания 5
+
+В [circuit-breaker-config.yaml](src/kubernetes/circuit-breaker-config.yaml) два DestinationRule, для `monolith` и `movies-service`: не больше пяти соединений и двух запросов в очереди, а экземпляр, который трижды подряд ответил 5xx, на минуту убирается из балансировки, но не больше половины экземпляров сразу. Лимиты маленькие, чтобы срабатывание было видно на одной реплике и учебной нагрузке, для прода их надо подбирать по реальному трафику. Istio ставил helm-чартами, как в инструкции выше. После метки `istio-injection` перезапустил деплойменты, чтобы к подам подсели sidecar.
+
+Fortio в 50 потоков на 500 запросов: больше 90% ответов 503, потому что запросы сверх лимита сразу отбивает sidecar. В статистике это `upstream_rq_pending_overflow`.
+
+![Circuit breaker](docs/screenshots/task5-circuit-breaker.png)
 
 Удаляем все
 ```bash
